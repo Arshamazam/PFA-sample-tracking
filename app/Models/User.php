@@ -3,14 +3,17 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\UserRole;
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, HasUlids, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -21,6 +24,10 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
+        'phone',
+        'cnic',
+        'is_active',
     ];
 
     /**
@@ -43,6 +50,40 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'role' => UserRole::class,
+            'is_active' => 'boolean',
         ];
+    }
+
+    // Relationships -------------------------------------------------------
+
+    /** @return HasMany<SamplingEvent, $this> */
+    public function samplingEvents(): HasMany
+    {
+        return $this->hasMany(SamplingEvent::class, 'fso_id');
+    }
+
+    /** @return HasMany<RapidTest, $this> */
+    public function rapidTests(): HasMany
+    {
+        return $this->hasMany(RapidTest::class, 'fso_id');
+    }
+
+    /** @return HasMany<CustodyEvent, $this> */
+    public function custodyEvents(): HasMany
+    {
+        return $this->hasMany(CustodyEvent::class, 'actor_id');
+    }
+
+    /** @return HasMany<LabResult, $this> */
+    public function analyzedResults(): HasMany
+    {
+        return $this->hasMany(LabResult::class, 'analyst_id');
+    }
+
+    /** @return HasMany<LabResult, $this> */
+    public function verifiedResults(): HasMany
+    {
+        return $this->hasMany(LabResult::class, 'verified_by_id');
     }
 }
