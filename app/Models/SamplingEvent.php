@@ -28,6 +28,7 @@ class SamplingEvent extends Model
         'witness_signature_path',
         'collected_at',
         'finalized_at',
+        'stale_flagged_at',
     ];
 
     protected function casts(): array
@@ -36,7 +37,16 @@ class SamplingEvent extends Model
             'is_perishable' => 'boolean',
             'collected_at' => 'datetime',
             'finalized_at' => 'datetime',
+            'stale_flagged_at' => 'datetime',
         ];
+    }
+
+    /**
+     * A draft event is one that has not yet satisfied the Rule of Three.
+     */
+    public function isDraft(): bool
+    {
+        return $this->finalized_at === null;
     }
 
     // Relationships -------------------------------------------------------
