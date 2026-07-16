@@ -48,8 +48,11 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::middleware('role:FSO,TRANSPORT')->group(function () {
         Route::post('custody/scan', [CustodyController::class, 'scan']);
     });
-    // Part lookup + timeline (any authenticated staff member).
-    Route::get('custody/parts/{qrToken}', [CustodyController::class, 'showPart']);
+    // Part lookup + timeline. This returns the FULL de-blinded record (event,
+    // premises, custody trail), so LAB_ANALYST must be excluded — otherwise it is a
+    // back door around the blind wall. Locked by BlindWallTest.
+    Route::get('custody/parts/{qrToken}', [CustodyController::class, 'showPart'])
+        ->middleware('role:FSO,TRANSPORT,REGISTRATION_OFFICER,VERIFYING_OFFICER,ADMIN');
 
     // Rapid tests — FSO only.
     Route::middleware('role:FSO')->group(function () {
