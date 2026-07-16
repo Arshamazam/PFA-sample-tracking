@@ -68,8 +68,8 @@ class RapidTestController extends Controller
         $rapidTest = RapidTest::create([
             'premises_id' => $premises->id,
             'fso_id' => $request->user()->id,
-            'device' => $request->string('device'),
-            'reading' => $request->string('reading'),
+            'device' => $request->input('device'),
+            'reading' => $request->input('reading'),
             'passed' => $request->boolean('passed'),
             'photo_path' => $photoPath,
             'tested_at' => $request->date('tested_at'),
