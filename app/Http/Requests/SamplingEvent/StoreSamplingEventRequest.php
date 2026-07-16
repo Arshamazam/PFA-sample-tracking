@@ -23,6 +23,8 @@ class StoreSamplingEventRequest extends FormRequest
             'premises_city' => ['sometimes', 'string', 'max:255'],
 
             'food_item' => ['required', 'string', 'max:255'],
+            // Drives lab-section auto-suggestion (e.g. MILK, OIL_GHEE, WATER, SPICES).
+            'food_category' => ['nullable', 'string', 'max:255'],
             'brand_name' => ['nullable', 'string', 'max:255'],
             'is_perishable' => ['required', 'boolean'],
             'collected_at' => ['required', 'date'],

@@ -88,6 +88,7 @@ class SamplingEventController extends Controller
             'premises_id' => $premises->id,
             'fso_id' => $request->user()->id,
             'food_item' => $request->string('food_item'),
+            'food_category' => $request->input('food_category'),
             'brand_name' => $request->input('brand_name'),
             'is_perishable' => $request->boolean('is_perishable'),
             'witness_name' => $request->input('witness_name', ''),

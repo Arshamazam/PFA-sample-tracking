@@ -56,4 +56,10 @@ class SamplePart extends Model
     {
         return $this->hasOne(LabResult::class);
     }
+
+    /** @return HasMany<SopViolation, $this> */
+    public function sopViolations(): HasMany
+    {
+        return $this->hasMany(SopViolation::class);
+    }
 }
