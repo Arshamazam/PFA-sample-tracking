@@ -15,10 +15,11 @@ of the reserved reference part. It is designed to run on modest shared hosting w
 a MariaDB/MySQL database and no long-running processes, and exposes a token-based
 JSON API intended for a field mobile app.
 
-> **Phase status.** Phase 1 (schema, enums, models, seeders) and Phase 2 (auth,
-> rapid tests, sampling events, the custody state machine, QR, and custody scanning)
-> are complete. Registration/blind coding, the lab workbench, verdicts, disputes,
-> and public tracking are later phases.
+> **Phase status.** Complete: Phase 1 (schema, enums, models, seeders), Phase 2
+> (auth, rapid tests, sampling events, the custody state machine, QR, custody
+> scanning), and Phase 3 (registration/receiving, blind coding, the lab workbench
+> behind the blind wall, maker-checker verdicts, report PDFs, and admin essentials).
+> Disputes/resampling, public tracking, SMS, and the UI are later phases.
 
 ## Documentation
 
@@ -131,8 +132,21 @@ as the PFA Warehouse system) — do not ship them to production.
 | Verifying Officer | `verifying_officer@pfa.test` | `password` |
 | Administrator | `admin@pfa.test` | `password` |
 
-The field APIs in this phase are exercised by the **FSO** (and **TRANSPORT** for
-custody scanning).
+Each role maps to a stage of the workflow: **FSO** collects (and **TRANSPORT** carries),
+**REGISTRATION_OFFICER** receives and blind-codes, **LAB_ANALYST** tests behind the blind
+wall, **VERIFYING_OFFICER** issues the verdict, **ADMIN** administers.
+
+## Background jobs
+
+Report PDFs are rendered in a queued job (`database` driver), so a worker must be
+running for reports to be produced:
+
+```bash
+php artisan queue:work
+```
+
+Without a worker, a verified sample stays at `VERIFIED` and no PDF appears — this is
+by design, and `reports:retry-failed` re-queues anything left behind.
 
 ## Artisan commands
 
@@ -140,12 +154,36 @@ custody scanning).
 |---------|-------------|
 | `php artisan migrate:fresh --seed` | Rebuild the schema and seed reference data |
 | `php artisan sampling:prune-drafts` | Flag draft sampling events left unfinalized > 24h (never deletes). Accepts `--hours=`. Scheduled daily at 01:00. |
+| `php artisan queue:work` | Process queued jobs (report PDF generation) |
+| `php artisan reports:retry-failed` | Re-queue report PDFs for verified samples whose report never generated. Accepts `--limit=`. |
+
+## Configurable settings
+
+Runtime rules live in the `settings` table (seeded by `SettingsSeeder`) rather than in
+code:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `dispute_window_days` | `7` | Days an FBO has to dispute an UNFIT verdict (Phase 5) |
+| `same_day_transfer_deadline` | `20:00` | Samples reaching registration later than this on the collection day are flagged `SAME_DAY_TRANSFER` |
+| `cold_chain_min_c` / `cold_chain_max_c` | `0` / `8` | Acceptable perishable temperature range; outside it a scan is accepted but flagged `COLD_CHAIN_BREACH` |
+
+Report branding (logo, authority names) is in [config/pfa.php](config/pfa.php) — drop
+the official crest in and point `PFA_REPORT_LOGO` at it.
 
 ## Notes for maintainers
 
+- **The blind wall is a hard requirement, not a preference.** Lab analysts must never
+  learn whose sample they are testing. Anything analyst-facing goes through
+  `App\Http\Resources\BlindSamplePartResource`, and
+  `tests/Feature/BlindWallTest.php` recursively scans every analyst payload for
+  identifying keys *and* values. If that test fails, fix the leak — never the test.
 - Premises lookups auto-create a `MANUAL` fallback record when a license number is
   unknown locally — a **temporary** measure until the PFA ~400k business database is
   integrated (`App\Services\PremisesResolver`).
+- SOP deviations (late transfer, cold-chain breach) are **recorded, not blocking** —
+  the sample still moves so lab work is not lost, and an admin resolves the flag via
+  `/admin/sop-violations`. A *missing* perishable temperature is still a hard block.
 - Under PHP 8.5 the framework's bundled base config references a PDO constant that is
   deprecated in 8.5; it is harmless and does not occur on the 8.2/8.3 production
   target. `bootstrap/app.php` strips only `E_DEPRECATED` before config loads so it

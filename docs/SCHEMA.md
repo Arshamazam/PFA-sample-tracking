@@ -45,6 +45,7 @@ Punjab Food Authority Act 2011.
 | `settings` | Key-value app settings | `key` (unique), `value` |
 | `sequence_counters` | Transaction-safe named counters | `key` (PK), `value` — backs the event-code generator |
 | `personal_access_tokens` | Sanctum API tokens (Phase 2) | ULID `tokenable` morph to `users`; `abilities` |
+| `sop_violations` | SOP deviations (Phase 3) | `sample_part_id`, `type`*, `details` (json), `detected_at`, `resolved_at`, `resolved_by_id`, `resolution_notes` |
 
 `*` = indexed.
 
@@ -52,6 +53,33 @@ Punjab Food Authority Act 2011.
 > timestamp (set by `sampling:prune-drafts` to flag abandoned drafts, never
 > delete), and `personal_access_tokens` was added for Sanctum with a ULID
 > `tokenable` key to match the ULID `users` PK.
+
+> **Phase 3 additions.** `sampling_events.food_category` (set by the FSO; drives
+> lab-section routing via `test_catalog`), `lab_results.lab_result_revisions` (json
+> archive of superseded analyst submissions), and the `sop_violations` table.
+
+## SOP Violations
+
+Deviations are **recorded, not blocking** — the sample still moves so the lab work is
+not lost, and an admin resolves the flag later.
+
+- **`SAME_DAY_TRANSFER`** — the sample reached registration after its collection date,
+  or after `same_day_transfer_deadline` on the collection date.
+- **`COLD_CHAIN_BREACH`** — a perishable sample was scanned into `IN_TRANSIT` or
+  `RECEIVED_REGISTRATION` with a temperature outside
+  `cold_chain_min_c`..`cold_chain_max_c`. (A *missing* temperature is still a hard
+  block — see the cold-chain guard.)
+- **`OTHER`**
+
+## The Blind Wall
+
+From `BLIND_CODED` onwards a LAB part is addressed by its `blind_code`
+(`BC-{YYYY}-{6-digit}`, allocated from the same `sequence_counters` mechanism as
+event codes). Lab analysts are served exclusively by
+`App\Http\Resources\BlindSamplePartResource`, an allow-list that never reveals the
+premises, licence, brand, witness, FSO, event code, QR token, or part id. Analyst
+roles are additionally barred from every de-blinded endpoint (including
+`custody/parts/{qr_token}` and the report PDF). See `tests/Feature/BlindWallTest.php`.
 
 ## Event Codes
 
@@ -80,14 +108,39 @@ All in [`app/Enums/`](../app/Enums), stored as strings:
 > The Phase-1 schema defines the *vocabulary* of `PartStatus`; the transition rules
 > (state machine) are enforced in Phase 2, not the database.
 
-## Typical Part Lifecycle
+## Part Lifecycle (as encoded through Phase 3)
+
+The transition map is keyed by role, so each part type has its own path:
 
 ```
-COLLECTED → SEALED → IN_TRANSIT → RECEIVED_REGISTRATION → BLIND_CODED
-  → ASSIGNED_TO_SECTION → TESTING → RESULT_ENTERED → VERIFIED → REPORT_ISSUED
-  → IN_RETENTION → (RELEASED_TO_FBO | ACTIVATED_FOR_RETEST | DESTROYED)
+LAB:       COLLECTED → SEALED → IN_TRANSIT → RECEIVED_REGISTRATION → BLIND_CODED
+             → ASSIGNED_TO_SECTION → TESTING → RESULT_ENTERED → VERIFIED
+             → REPORT_ISSUED (terminal)
+           RESULT_ENTERED → TESTING is also allowed (verifier returns work)
+
+REFERENCE: COLLECTED → SEALED → IN_TRANSIT → RECEIVED_REGISTRATION → IN_RETENTION
+           (ACTIVATED_FOR_RETEST path arrives with disputes, Phase 5)
+
+FBO_COPY:  COLLECTED → SEALED → RELEASED_TO_FBO (terminal)
 ```
-`REJECTED` may occur where a part fails intake checks.
+
+Any non-terminal state may also move to `REJECTED` (notes mandatory) — e.g. a broken
+seal at intake. Terminal states: `REPORT_ISSUED`, `RELEASED_TO_FBO`, `REJECTED`,
+`DESTROYED`.
+
+**Role guards** (who may move a part *into* a state):
+
+| Target | Required role |
+|--------|---------------|
+| `IN_TRANSIT` | FSO, TRANSPORT |
+| `RECEIVED_REGISTRATION`, `BLIND_CODED`, `ASSIGNED_TO_SECTION`, `IN_RETENTION` | REGISTRATION_OFFICER |
+| `TESTING`, `RESULT_ENTERED` | LAB_ANALYST |
+| `VERIFIED`, `REPORT_ISSUED` | VERIFYING_OFFICER |
+
+`RESULT_ENTERED → TESTING` is a transition-specific override requiring
+VERIFYING_OFFICER (the same target, `TESTING`, is otherwise the analyst's). A null
+actor means a system-generated event (e.g. the PDF job issuing the report) and
+bypasses role checks.
 
 ## Seeded Data (development)
 
