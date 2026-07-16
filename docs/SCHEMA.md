@@ -44,8 +44,14 @@ Punjab Food Authority Act 2011.
 | `test_catalog` | Test templates per food category | `food_category`*, `lab_section`, `test_name`, `parameters` (json), `tat_hours` |
 | `settings` | Key-value app settings | `key` (unique), `value` |
 | `sequence_counters` | Transaction-safe named counters | `key` (PK), `value` — backs the event-code generator |
+| `personal_access_tokens` | Sanctum API tokens (Phase 2) | ULID `tokenable` morph to `users`; `abilities` |
 
 `*` = indexed.
+
+> **Phase 2 additions.** `sampling_events` gained a nullable `stale_flagged_at`
+> timestamp (set by `sampling:prune-drafts` to flag abandoned drafts, never
+> delete), and `personal_access_tokens` was added for Sanctum with a ULID
+> `tokenable` key to match the ULID `users` PK.
 
 ## Event Codes
 

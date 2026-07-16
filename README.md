@@ -1,66 +1,97 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# PFA Sample Testing & Tracking System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A chain-of-custody system for food sample testing under the Punjab Food Authority
+Act 2011. It digitises the legal sampling SOP end to end: a field officer records a
+rapid screening test, collects a formal sample that is split into three sealed
+parts in front of a witness (the "Rule of Three"), and every subsequent movement of
+each part is captured as an immutable, timestamped custody event. Each part carries
+its own QR code and tamper seal so it can be tracked from the point of collection
+through the laboratory to final disposal.
 
-## About Laravel
+The system is built for the realities of the deployment: samples are analysed
+"blind" so lab staff never see the business identity, perishable samples enforce a
+cold-chain temperature record at each hop, and disputed results can trigger a retest
+of the reserved reference part. It is designed to run on modest shared hosting with
+a MariaDB/MySQL database and no long-running processes, and exposes a token-based
+JSON API intended for a field mobile app.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+> **Phase status.** Phase 1 (schema, enums, models, seeders) and Phase 2 (auth,
+> rapid tests, sampling events, the custody state machine, QR, and custody scanning)
+> are complete. Registration/blind coding, the lab workbench, verdicts, disputes,
+> and public tracking are later phases.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Documentation
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- [docs/SCHEMA.md](docs/SCHEMA.md) — database schema, enums, and the part lifecycle.
+- [docs/API.md](docs/API.md) — every Phase 2 endpoint with request/response examples
+  and a copy-paste happy-path walkthrough.
 
-## Learning Laravel
+## Requirements
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP 8.2+ (developed on 8.5; production target 8.2/8.3)
+- Composer
+- MariaDB or MySQL
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+## Setup
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```bash
+# 1. Install dependencies
+composer install
 
-## Laravel Sponsors
+# 2. Configure environment
+cp .env.example .env
+php artisan key:generate
+# edit .env DB_DATABASE / DB_USERNAME / DB_PASSWORD as needed
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+# 3. Create the database, then run migrations + seeders
+php artisan migrate:fresh --seed
 
-### Premium Partners
+# 4. Serve
+php artisan serve
+```
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+The API is served under `/api/v1`. See [docs/API.md](docs/API.md).
 
-## Contributing
+### Tests
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Feature/unit tests run against a dedicated schema (`pfa_sample_tracking_test`):
 
-## Code of Conduct
+```bash
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS pfa_sample_tracking_test"
+php artisan test
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Seeded test accounts
 
-## Security Vulnerabilities
+`RoleUsersSeeder` creates one account per role. **These are TEMPORARY development
+accounts** pending integration with the PFA staff database (the same interim pattern
+as the PFA Warehouse system) — do not ship them to production.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+| Role | Email | Password |
+|------|-------|----------|
+| Food Safety Officer | `fso@pfa.test` | `password` |
+| Transport Officer | `transport@pfa.test` | `password` |
+| Registration Officer | `registration_officer@pfa.test` | `password` |
+| Lab Analyst | `lab_analyst@pfa.test` | `password` |
+| Verifying Officer | `verifying_officer@pfa.test` | `password` |
+| Administrator | `admin@pfa.test` | `password` |
 
-## License
+The field APIs in this phase are exercised by the **FSO** (and **TRANSPORT** for
+custody scanning).
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Artisan commands
+
+| Command | Description |
+|---------|-------------|
+| `php artisan migrate:fresh --seed` | Rebuild the schema and seed reference data |
+| `php artisan sampling:prune-drafts` | Flag draft sampling events left unfinalized > 24h (never deletes). Accepts `--hours=`. Scheduled daily at 01:00. |
+
+## Notes for maintainers
+
+- Premises lookups auto-create a `MANUAL` fallback record when a license number is
+  unknown locally — a **temporary** measure until the PFA ~400k business database is
+  integrated (`App\Services\PremisesResolver`).
+- Under PHP 8.5 the framework's bundled base config references a PDO constant that is
+  deprecated in 8.5; it is harmless and does not occur on the 8.2/8.3 production
+  target. `bootstrap/app.php` strips only `E_DEPRECATED` before config loads so it
+  never leaks into responses.
