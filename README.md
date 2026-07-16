@@ -45,12 +45,67 @@ php artisan key:generate
 
 # 3. Create the database, then run migrations + seeders
 php artisan migrate:fresh --seed
+```
 
-# 4. Serve
+## Running the project
+
+```bash
 php artisan serve
 ```
 
-The API is served under `/api/v1`. See [docs/API.md](docs/API.md).
+This starts the PHP development server on <http://127.0.0.1:8000>. The API is served
+under `/api/v1` — see [docs/API.md](docs/API.md) for every endpoint and a copy-paste
+happy-path walkthrough, and authenticate with one of the seeded test accounts below.
+
+The API phases have no frontend to build, but if you are working on the Blade views,
+`composer dev` runs the server, queue worker, log tailer, and Vite together.
+
+### Changing the port
+
+`php artisan serve` listens on port **8000** by default. To override it for a single
+run:
+
+```bash
+php artisan serve --port=8080
+```
+
+To change it permanently, set `SERVER_PORT` in `.env`. Artisan reads it as the default
+for `--port`, so it applies to `composer dev` too:
+
+```dotenv
+SERVER_PORT=8080
+```
+
+`SERVER_HOST` works the same way for the bind address. Binding to `0.0.0.0` makes the
+API reachable from other devices on the network, which is what you want when testing
+against the field mobile app on a real phone:
+
+```dotenv
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8080
+```
+
+**When you change the port, update `APP_URL` to match:**
+
+```dotenv
+APP_URL=http://127.0.0.1:8080
+```
+
+`App\Services\QrService` bakes `APP_URL` into every part's QR code as
+`{APP_URL}/track/p/{qr_token}`. If it is stale, the QR codes printed for sample parts
+point at the wrong port and scanned tracking links will not resolve — and because the
+code is fixed at generation time, fixing `APP_URL` later does not repair codes that
+were already issued.
+
+Two things worth knowing:
+
+- If the port is busy, `artisan serve` retries on the next port up (8001, 8002, … up
+  to `--tries`, default 10). This only happens while the port is left at its default —
+  passing `--port` or setting `SERVER_PORT` pins it, and a busy port fails instead of
+  moving. Pinning is usually what you want, since a server that silently moves ends up
+  disagreeing with `APP_URL`.
+- `DB_PORT` in `.env` is the MariaDB/MySQL port (3306), not the application's. Changing
+  it will not move the web server.
 
 ### Tests
 

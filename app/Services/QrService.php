@@ -40,4 +40,13 @@ class QrService
 
         return $writer->writeString($this->trackingUrl($part));
     }
+
+    /**
+     * The QR as a base64 SVG data URI, for embedding in an <img> (e.g. the report
+     * PDF, where dompdf renders SVG images via svg-lib).
+     */
+    public function svgDataUri(SamplePart $part, int $size = 256): string
+    {
+        return 'data:image/svg+xml;base64,'.base64_encode($this->svg($part, $size));
+    }
 }

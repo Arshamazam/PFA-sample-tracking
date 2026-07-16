@@ -1,11 +1,18 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminSopViolationController;
+use App\Http\Controllers\Api\V1\Admin\AdminTestCatalogController;
+use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustodyController;
 use App\Http\Controllers\Api\V1\FileController;
+use App\Http\Controllers\Api\V1\LabController;
 use App\Http\Controllers\Api\V1\QrController;
 use App\Http\Controllers\Api\V1\RapidTestController;
+use App\Http\Controllers\Api\V1\RegistrationController;
+use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SamplingEventController;
+use App\Http\Controllers\Api\V1\VerificationController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -58,5 +65,48 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::patch('sampling-events/{samplingEvent}', [SamplingEventController::class, 'update']);
         Route::post('sampling-events/{samplingEvent}/parts', [SamplingEventController::class, 'addPart']);
         Route::post('sampling-events/{samplingEvent}/finalize', [SamplingEventController::class, 'finalize']);
+    });
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 3 — Technical Wing
+    |----------------------------------------------------------------------
+    */
+
+    // Registration Section — works from the physical QR on the sample.
+    Route::middleware('role:REGISTRATION_OFFICER')->prefix('registration')->group(function () {
+        Route::post('receive', [RegistrationController::class, 'receive']);
+        Route::post('retain', [RegistrationController::class, 'retain']);
+        Route::post('blind-code', [RegistrationController::class, 'blindCode']);
+        Route::post('assign-section', [RegistrationController::class, 'assignSection']);
+        Route::get('suggest-section', [RegistrationController::class, 'suggestSection']);
+    });
+
+    // Lab workbench — BEHIND THE BLIND WALL. Addressed only by blind_code, and
+    // every response here must be a BlindSamplePartResource.
+    Route::middleware('role:LAB_ANALYST')->prefix('lab')->group(function () {
+        Route::get('queue', [LabController::class, 'queue']);
+        Route::post('{blindCode}/start', [LabController::class, 'start']);
+        Route::post('{blindCode}/results', [LabController::class, 'storeResults']);
+    });
+
+    // Verification (maker-checker) — sees the full de-blinded record.
+    Route::middleware('role:VERIFYING_OFFICER')->prefix('verification')->group(function () {
+        Route::get('queue', [VerificationController::class, 'queue']);
+        Route::post('{blindCode}/verdict', [VerificationController::class, 'verdict']);
+        Route::post('{blindCode}/return', [VerificationController::class, 'returnToAnalyst']);
+    });
+
+    // Report download — role check lives in the controller because the owning FSO
+    // is allowed too (and analysts are explicitly excluded).
+    Route::get('reports/{blindCode}.pdf', [ReportController::class, 'show'])->name('reports.show');
+
+    // Admin essentials.
+    Route::middleware('role:ADMIN')->prefix('admin')->group(function () {
+        Route::apiResource('users', AdminUserController::class)->except(['destroy']);
+        Route::apiResource('test-catalog', AdminTestCatalogController::class)
+            ->parameters(['test-catalog' => 'testCatalog']);
+        Route::get('sop-violations', [AdminSopViolationController::class, 'index']);
+        Route::patch('sop-violations/{sopViolation}', [AdminSopViolationController::class, 'update']);
     });
 });
