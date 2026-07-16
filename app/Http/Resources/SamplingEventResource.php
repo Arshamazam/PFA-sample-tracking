@@ -24,6 +24,7 @@ class SamplingEventResource extends JsonResource
             'premises_id' => $this->premises_id,
             'fso_id' => $this->fso_id,
             'food_item' => $this->food_item,
+            'food_category' => $this->food_category,
             'brand_name' => $this->brand_name,
             'is_perishable' => $this->is_perishable,
             'witness_name' => $this->witness_name,

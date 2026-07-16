@@ -21,6 +21,7 @@ class SamplingEvent extends Model
         'premises_id',
         'fso_id',
         'food_item',
+        'food_category',
         'brand_name',
         'is_perishable',
         'witness_name',

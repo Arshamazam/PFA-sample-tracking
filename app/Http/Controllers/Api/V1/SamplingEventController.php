@@ -25,8 +25,12 @@ use Illuminate\Validation\ValidationException;
 
 class SamplingEventController extends Controller
 {
-    // TODO: derive the district from the FSO's assigned district / config once modelled.
-    private const DISTRICT = 'LHR';
+    // TODO: derive per-FSO once districts are modelled on users/premises.
+    // Until then this is configurable via PFA_DISTRICT (config/pfa.php).
+    private function district(): string
+    {
+        return config('pfa.district', 'LHR');
+    }
 
     public function __construct(
         private readonly PremisesResolver $premisesResolver,
@@ -84,10 +88,11 @@ class SamplingEventController extends Controller
         );
 
         $event = SamplingEvent::create([
-            'event_code' => $this->eventCodes->generate(self::DISTRICT),
+            'event_code' => $this->eventCodes->generate($this->district()),
             'premises_id' => $premises->id,
             'fso_id' => $request->user()->id,
             'food_item' => $request->string('food_item'),
+            'food_category' => $request->input('food_category'),
             'brand_name' => $request->input('brand_name'),
             'is_perishable' => $request->boolean('is_perishable'),
             'witness_name' => $request->input('witness_name', ''),

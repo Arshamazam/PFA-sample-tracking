@@ -198,6 +198,164 @@ Phase 6.)
 
 ---
 
+---
+
+# Phase 3 — Technical Wing (registration, lab, verification, reports)
+
+## Registration Section (role: REGISTRATION_OFFICER)
+
+Registration works from the **physical QR** on the sample, so these endpoints take
+`qr_token`. The blind wall starts at the lab workbench.
+
+### POST /registration/receive
+`multipart/form-data`. Records arrival at the Technical Wing.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `qr_token` | string | required |
+| `seal_intact` | boolean | required |
+| `seal_number_confirmed` | boolean | required — officer confirms the seal number matches the record |
+| `seal_photo` | file (image) | **required** — the receiving-side photo, kept even on rejection |
+| `temperature_c` | number | required for perishables (enforced by the state machine) |
+| `notes` | string | **required when rejecting** |
+
+Behaviour:
+- `seal_intact=false` **or** `seal_number_confirmed=false` → part moves to **REJECTED**
+  (notes mandatory; 422 without them).
+- Otherwise → **RECEIVED_REGISTRATION**.
+- **Late arrival** (after the collection date, or past `same_day_transfer_deadline`
+  on the collection date) → still accepted, but a `SAME_DAY_TRANSFER` SOP violation
+  is recorded.
+- **Temperature outside `cold_chain_min_c`..`cold_chain_max_c`** → still accepted,
+  but a `COLD_CHAIN_BREACH` violation is recorded.
+
+Response `200`: the full part resource, including `sop_violations[]`.
+
+### POST /registration/retain
+`{ "qr_token": "...", "storage_location": "Cabinet B/3", "notes": null }`
+REFERENCE part only (422 otherwise) → **IN_RETENTION**.
+
+### POST /registration/blind-code
+`{ "qr_token": "..." }` → assigns the next `BC-{YYYY}-{6-digit}` code (transaction-safe
+counter) and moves the part to **BLIND_CODED**. LAB parts only — the transition map
+rejects a REFERENCE part with 422.
+
+### POST /registration/assign-section
+`{ "qr_token": "...", "lab_section": "CHEMICAL" }` → records the section on the
+lab result and moves the part to **ASSIGNED_TO_SECTION**.
+
+### GET /registration/suggest-section?qr_token=…
+Suggests the section from `test_catalog` using the event's `food_category`.
+```json
+{ "data": {
+    "food_category": "MILK",
+    "suggested_lab_section": "CHEMICAL",
+    "suggested_test_name": "Milk Composition & Adulteration",
+    "parameters_template": [ { "name": "Fat", "unit": "%", "permissible_limit": "min 3.5" } ],
+    "available": [ { "lab_section": "CHEMICAL", "test_name": "…", "tat_hours": 48 },
+                   { "lab_section": "MICROBIOLOGY", "test_name": "…", "tat_hours": 72 } ]
+  }, "meta": { "matched": 2 } }
+```
+
+> **Flutter/API note:** `food_category` is set by the FSO at collection
+> (`POST /sampling-events`, optional `food_category`, e.g. `MILK`, `OIL_GHEE`,
+> `WATER`, `SPICES`, `MEAT`). Without it, section suggestion returns nulls and lab
+> parameter validation is skipped — so the app should always send it.
+
+## The blind wall (role: LAB_ANALYST)
+
+Analysts address samples **only by `blind_code`** and receive a deliberately minimal
+payload. Every `/lab/*` response contains exactly these fields:
+
+```json
+{ "data": {
+    "blind_code": "BC-2026-000001",
+    "food_category": "MILK",
+    "food_item": "Loose Milk",
+    "is_perishable": true,
+    "lab_section": "CHEMICAL",
+    "lab_section_label": "Chemical",
+    "status": "TESTING",
+    "status_label": "Testing",
+    "received_at": "2026-07-16T16:24:38+00:00",
+    "assigned_at": "2026-07-16T16:24:38+00:00",
+    "parameters_template": [ … ],
+    "parameters": [ … ]
+  } }
+```
+
+Never exposed to analysts: `qr_token`, seal number/photos, **any** premises data
+(name, address, `license_no`), `brand_name`, witness details, the FSO's identity,
+`event_code`, `sampling_event_id`, the part id, the custody trail, or the verdict.
+Analysts are also blocked from `/verification/*`, `/sampling-events`, `/rapid-tests`,
+`/custody/parts/{qr_token}` and the report PDF (all `403`).
+`tests/Feature/BlindWallTest.php` enforces this by recursively scanning every
+analyst payload for forbidden keys **and** identifying values.
+
+### GET /lab/queue?section=CHEMICAL
+Blind resources for parts in `ASSIGNED_TO_SECTION` or `TESTING` in that section,
+oldest first. Paginated.
+
+### POST /lab/{blind_code}/start
+`ASSIGNED_TO_SECTION → TESTING`, claiming the sample for the analyst.
+
+### POST /lab/{blind_code}/results
+`multipart/form-data`:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `parameters[]` | array | `{name, value, unit, permissible_limit, within_limit, is_additional?}` |
+| `report_photo` | file (image) | required — the physical bench report |
+
+- Parameter names are validated against the `test_catalog` template for the sample's
+  `food_category`; anything outside it must set `is_additional: true` (422 otherwise).
+- First submission: `TESTING → RESULT_ENTERED`. While `RESULT_ENTERED` the analyst may
+  re-submit; the previous parameters are archived to `lab_result_revisions` and the
+  state does not advance.
+- Sending `verdict` (or `verdict_at`) returns **422** — the verdict is not the
+  analyst's to set.
+
+## Verification / maker-checker (role: VERIFYING_OFFICER)
+
+### GET /verification/queue
+Parts at `RESULT_ENTERED` with the **full de-blinded** record — `sampling_event`,
+`premises`, `license_no`, `brand_name`, plus `lab_result` and `sop_violations`.
+A verdict is a legal determination about a named business, so this role sees everything.
+
+### POST /verification/{blind_code}/verdict
+`{ "verdict": "FIT" | "UNFIT", "notes": "…" }`
+Sets `verdict`, `verdict_at`, `verified_by_id`, moves the part to **VERIFIED**, and
+dispatches the report job.
+**Maker-checker:** if the verifier is the analyst who produced the result → `422`.
+
+### POST /verification/{blind_code}/return
+`{ "notes": "required reason" }` → `RESULT_ENTERED → TESTING` so the analyst can redo
+the work.
+
+## Reports
+
+The PDF is rendered by the queued `GenerateReportPdf` job (queue driver `database`;
+run a worker: `php artisan queue:work`). It writes to private storage at
+`reports/{event_code}/{part_id}.pdf`, sets `report_pdf_path`, and moves the part to
+**REPORT_ISSUED** as a system actor. If the job fails the part stays at `VERIFIED`;
+`php artisan reports:retry-failed` re-queues it.
+
+### GET /reports/{blind_code}.pdf
+Returns `application/pdf`. Allowed: `VERIFYING_OFFICER`, `REGISTRATION_OFFICER`,
+`ADMIN`, and the **owning FSO**. Analysts get `403` (the report names the business).
+`404` if the report has not been generated yet.
+
+## Admin (role: ADMIN)
+
+| Endpoint | Notes |
+|----------|-------|
+| `GET/POST /admin/users`, `GET/PATCH /admin/users/{user}` | Create with a role; deactivate/reactivate via `is_active`. Accounts are never deleted (the custody trail references them). Deactivating **your own** account → 422. |
+| `GET/POST /admin/test-catalog`, `GET/PATCH/DELETE /admin/test-catalog/{testCatalog}` | Filter by `food_category`, `lab_section`. |
+| `GET /admin/sop-violations` | Filter `type` (`SAME_DAY_TRANSFER`\|`COLD_CHAIN_BREACH`\|`OTHER`), `resolved` (bool), `from`, `to`. |
+| `PATCH /admin/sop-violations/{sopViolation}` | `{ "resolved": true, "resolution_notes": "…" }` — notes required when resolving. |
+
+---
+
 ## Happy-path walkthrough (curl)
 
 Assumes the app is served at `http://127.0.0.1:8000` and seeded
@@ -241,3 +399,58 @@ curl -s $ACC $AUTH -H 'Content-Type: application/json' -d "{
 # 6. Inspect the custody timeline (COLLECTED → SEALED → IN_TRANSIT)
 curl -s $ACC $AUTH $BASE/custody/parts/$LAB_TOKEN
 ```
+
+## Technical-wing walkthrough (curl) — receive → report
+
+Continues from the field walkthrough above (`$LAB_TOKEN` is the LAB part's QR token).
+Note the login limiter is **5/min per IP** — fetch each token once and reuse it.
+
+```bash
+BASE=http://127.0.0.1:8000/api/v1
+ACC='Accept: application/json'
+login() { curl -s -H "$ACC" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$1@pfa.test\",\"password\":\"password\",\"device_name\":\"cli\"}" \
+  $BASE/auth/login | php -r 'echo json_decode(file_get_contents("php://stdin"),true)["data"]["token"];'; }
+
+REG=$(login registration_officer); LAB=$(login lab_analyst); VER=$(login verifying_officer)
+
+# 1. Receive the LAB part (intact seal, cold-chain reading).
+#    A 12 C reading here is accepted but records a COLD_CHAIN_BREACH violation.
+curl -s -H "$ACC" -H "Authorization: Bearer $REG" \
+  -F "qr_token=$LAB_TOKEN" -F 'seal_intact=1' -F 'seal_number_confirmed=1' \
+  -F 'temperature_c=4' -F "seal_photo=@/tmp/x.png" $BASE/registration/receive
+
+# 2. Suggest a section, assign a blind code, route it.
+curl -s -H "$ACC" -H "Authorization: Bearer $REG" \
+  "$BASE/registration/suggest-section?qr_token=$LAB_TOKEN"
+
+BC=$(curl -s -H "$ACC" -H "Authorization: Bearer $REG" -H 'Content-Type: application/json' \
+  -d "{\"qr_token\":\"$LAB_TOKEN\"}" $BASE/registration/blind-code \
+  | php -r 'echo json_decode(file_get_contents("php://stdin"),true)["data"]["blind_code"];')
+echo "blind code: $BC"
+
+curl -s -H "$ACC" -H "Authorization: Bearer $REG" -H 'Content-Type: application/json' \
+  -d "{\"qr_token\":\"$LAB_TOKEN\",\"lab_section\":\"CHEMICAL\"}" $BASE/registration/assign-section
+
+# 3. Analyst: queue (blind — no premises/licence/brand anywhere), start, enter results.
+curl -s -H "$ACC" -H "Authorization: Bearer $LAB" "$BASE/lab/queue?section=CHEMICAL"
+curl -s -H "$ACC" -H "Authorization: Bearer $LAB" -X POST $BASE/lab/$BC/start
+curl -s -H "$ACC" -H "Authorization: Bearer $LAB" -X POST $BASE/lab/$BC/results \
+  -F 'parameters[0][name]=Fat' -F 'parameters[0][value]=2.9' -F 'parameters[0][unit]=%' \
+  -F 'parameters[0][permissible_limit]=min 3.5' -F 'parameters[0][within_limit]=0' \
+  -F "report_photo=@/tmp/x.png"
+
+# 4. Verifier: full de-blinded queue, then the verdict (a different user than the analyst).
+curl -s -H "$ACC" -H "Authorization: Bearer $VER" $BASE/verification/queue
+curl -s -H "$ACC" -H "Authorization: Bearer $VER" -H 'Content-Type: application/json' \
+  -d '{"verdict":"UNFIT","notes":"Fat below permissible limit."}' \
+  $BASE/verification/$BC/verdict
+
+# 5. Run the queued PDF job, then download the report.
+php artisan queue:work --once --stop-when-empty
+curl -s -o report.pdf -H "Authorization: Bearer $VER" "$BASE/reports/$BC.pdf" && head -c 5 report.pdf  # %PDF-
+```
+
+Verified output of the run above: part reaches `REPORT_ISSUED`, the PDF is written to
+`reports/PFA-LHR-2026-000001/{part}.pdf`, the verifier and owning FSO download it
+(`200`), and the analyst is refused (`403`).

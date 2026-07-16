@@ -32,6 +32,18 @@ class EventCodeGenerator
     }
 
     /**
+     * Build the next blind code (BC-{YYYY}-{6-digit}), scoped per year, using the
+     * same transaction-safe counter mechanism. Analysts see only this code.
+     */
+    public function generateBlindCode(?int $year = null): string
+    {
+        $year ??= (int) Carbon::now()->format('Y');
+        $sequence = $this->nextSequence(sprintf('blind_code:%d', $year));
+
+        return sprintf('BC-%d-%06d', $year, $sequence);
+    }
+
+    /**
      * Atomically allocate and return the next value for a named counter.
      *
      * Uses insertOrIgnore + a row lock inside a transaction so concurrent

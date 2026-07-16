@@ -23,6 +23,7 @@ class LabResult extends Model
         'analyst_id',
         'verified_by_id',
         'parameters',
+        'lab_result_revisions',
         'verdict',
         'verdict_at',
         'report_pdf_path',
@@ -35,6 +36,7 @@ class LabResult extends Model
             'lab_section' => LabSection::class,
             'verdict' => Verdict::class,
             'parameters' => 'array',
+            'lab_result_revisions' => 'array',
             'verdict_at' => 'datetime',
         ];
     }

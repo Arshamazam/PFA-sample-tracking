@@ -22,6 +22,7 @@ class UpdateSamplingEventRequest extends FormRequest
     {
         return [
             'food_item' => ['sometimes', 'string', 'max:255'],
+            'food_category' => ['sometimes', 'nullable', 'string', 'max:255'],
             'brand_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_perishable' => ['sometimes', 'boolean'],
             'collected_at' => ['sometimes', 'date'],

@@ -4,10 +4,13 @@ namespace App\Services;
 
 use App\Enums\PartRole;
 use App\Enums\PartStatus;
+use App\Enums\SopViolationType;
 use App\Enums\UserRole;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\CustodyEvent;
 use App\Models\SamplePart;
+use App\Models\Setting;
+use App\Models\SopViolation;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -30,10 +33,18 @@ class CustodyStateMachine
      */
     private const TRANSITIONS = [
         PartRole::LAB->value => [
-            // Phase 2 stops at RECEIVED_REGISTRATION; Phase 3 adds BLIND_CODED etc.
             'COLLECTED' => [PartStatus::SEALED],
             'SEALED' => [PartStatus::IN_TRANSIT],
             'IN_TRANSIT' => [PartStatus::RECEIVED_REGISTRATION],
+            // Phase 3: registration -> blind coding -> section -> testing -> result
+            //          -> verification -> report. RESULT_ENTERED may also be sent
+            //          back to TESTING by a verifying officer (maker-checker return).
+            'RECEIVED_REGISTRATION' => [PartStatus::BLIND_CODED],
+            'BLIND_CODED' => [PartStatus::ASSIGNED_TO_SECTION],
+            'ASSIGNED_TO_SECTION' => [PartStatus::TESTING],
+            'TESTING' => [PartStatus::RESULT_ENTERED],
+            'RESULT_ENTERED' => [PartStatus::VERIFIED, PartStatus::TESTING],
+            'VERIFIED' => [PartStatus::REPORT_ISSUED],
         ],
         PartRole::REFERENCE->value => [
             'COLLECTED' => [PartStatus::SEALED],
@@ -56,6 +67,7 @@ class CustodyStateMachine
      */
     private const TERMINAL = [
         PartStatus::RELEASED_TO_FBO,
+        PartStatus::REPORT_ISSUED,
         PartStatus::REJECTED,
         PartStatus::DESTROYED,
     ];
@@ -69,6 +81,26 @@ class CustodyStateMachine
     private const ROLE_REQUIREMENTS = [
         'IN_TRANSIT' => [UserRole::FSO, UserRole::TRANSPORT],
         'RECEIVED_REGISTRATION' => [UserRole::REGISTRATION_OFFICER],
+        'BLIND_CODED' => [UserRole::REGISTRATION_OFFICER],
+        'ASSIGNED_TO_SECTION' => [UserRole::REGISTRATION_OFFICER],
+        'IN_RETENTION' => [UserRole::REGISTRATION_OFFICER],
+        'TESTING' => [UserRole::LAB_ANALYST],
+        'RESULT_ENTERED' => [UserRole::LAB_ANALYST],
+        'VERIFIED' => [UserRole::VERIFYING_OFFICER],
+        'REPORT_ISSUED' => [UserRole::VERIFYING_OFFICER],
+    ];
+
+    /**
+     * Transition-specific role overrides, keyed "FROM->TO". These win over the
+     * target-status requirements above. Needed where the same target status is
+     * reached by different roles — e.g. an analyst STARTs testing
+     * (ASSIGNED_TO_SECTION->TESTING) but a verifying officer RETURNS work
+     * (RESULT_ENTERED->TESTING).
+     *
+     * @var array<string, array<int, UserRole>>
+     */
+    private const TRANSITION_ROLE_OVERRIDES = [
+        'RESULT_ENTERED->TESTING' => [UserRole::VERIFYING_OFFICER],
     ];
 
     /**
@@ -179,7 +211,9 @@ class CustodyStateMachine
         }
 
         // (c) Actor role check (skipped for system-generated events with no actor).
-        $required = self::ROLE_REQUIREMENTS[$to->value] ?? null;
+        // A transition-specific override (FROM->TO) wins over the target-status rule.
+        $overrideKey = $part->status->value.'->'.$to->value;
+        $required = self::TRANSITION_ROLE_OVERRIDES[$overrideKey] ?? self::ROLE_REQUIREMENTS[$to->value] ?? null;
         if ($required !== null && $actor !== null && ! in_array($actor->role, $required, true)) {
             $names = implode(', ', array_map(fn (UserRole $r) => $r->value, $required));
             throw new IllegalTransitionException(sprintf(
@@ -211,7 +245,46 @@ class CustodyStateMachine
 
             $part->update(['status' => $to]);
 
+            $this->recordColdChainBreachIfNeeded($part, $to, $context);
+
             return $event;
         });
+    }
+
+    /**
+     * Record a COLD_CHAIN_BREACH SOP violation when a perishable sample moves into a
+     * cold-chain checkpoint with a temperature outside the configured range. The
+     * transition itself is still accepted — the breach is flagged, not blocked.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function recordColdChainBreachIfNeeded(SamplePart $part, PartStatus $to, array $context): void
+    {
+        if (! in_array($to, self::COLD_CHAIN_TARGETS, true) || ! $part->samplingEvent->is_perishable) {
+            return;
+        }
+
+        $temp = $context['temperature_c'] ?? null;
+        if ($temp === null || $temp === '') {
+            return; // handled by the guard (temperature is mandatory here)
+        }
+
+        $min = (float) Setting::get('cold_chain_min_c', '0');
+        $max = (float) Setting::get('cold_chain_max_c', '8');
+        $temp = (float) $temp;
+
+        if ($temp < $min || $temp > $max) {
+            SopViolation::create([
+                'sample_part_id' => $part->id,
+                'type' => SopViolationType::COLD_CHAIN_BREACH,
+                'details' => [
+                    'temperature_c' => $temp,
+                    'min_c' => $min,
+                    'max_c' => $max,
+                    'at_status' => $to->value,
+                ],
+                'detected_at' => now(),
+            ]);
+        }
     }
 }

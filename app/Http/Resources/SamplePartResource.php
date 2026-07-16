@@ -39,6 +39,9 @@ class SamplePartResource extends JsonResource
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'custody_events' => CustodyEventResource::collection($this->whenLoaded('custodyEvents')),
+            'lab_result' => new LabResultResource($this->whenLoaded('labResult')),
+            'sampling_event' => new SamplingEventResource($this->whenLoaded('samplingEvent')),
+            'sop_violations' => SopViolationResource::collection($this->whenLoaded('sopViolations')),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
