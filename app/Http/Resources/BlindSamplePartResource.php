@@ -38,6 +38,14 @@ class BlindSamplePartResource extends JsonResource
         $event = $this->samplingEvent;
         $labSection = $this->labResult?->lab_section;
 
+        // A retest reuses the reference part, which sits at ACTIVATED_FOR_RETEST
+        // before the analyst starts. That status would betray that this is a
+        // retest, so we present it (and its label) exactly like a first-time
+        // ASSIGNED_TO_SECTION sample. The analyst must not be able to tell.
+        $status = $this->status === PartStatus::ACTIVATED_FOR_RETEST
+            ? PartStatus::ASSIGNED_TO_SECTION
+            : $this->status;
+
         return [
             'blind_code' => $this->blind_code,
             'food_category' => $event?->food_category,
@@ -45,10 +53,13 @@ class BlindSamplePartResource extends JsonResource
             'is_perishable' => (bool) $event?->is_perishable,
             'lab_section' => $labSection?->value,
             'lab_section_label' => $labSection?->label(),
-            'status' => $this->status->value,
-            'status_label' => $this->status->label(),
+            'status' => $status->value,
+            'status_label' => $status->label(),
             'received_at' => $this->custodyEventAt(PartStatus::RECEIVED_REGISTRATION),
-            'assigned_at' => $this->custodyEventAt(PartStatus::ASSIGNED_TO_SECTION),
+            // For a retest there is no ASSIGNED_TO_SECTION event; the activation event
+            // stands in for it — again indistinguishable from a normal assignment.
+            'assigned_at' => $this->custodyEventAt(PartStatus::ASSIGNED_TO_SECTION)
+                ?? $this->custodyEventAt(PartStatus::ACTIVATED_FOR_RETEST),
             'parameters_template' => $this->parametersTemplate(),
             // The analyst's own entered results (no verdict — that is not theirs).
             'parameters' => $this->labResult?->parameters,

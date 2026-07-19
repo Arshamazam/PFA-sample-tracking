@@ -43,7 +43,13 @@ class LabController extends Controller
         ]);
 
         $parts = SamplePart::query()
-            ->whereIn('status', [PartStatus::ASSIGNED_TO_SECTION->value, PartStatus::TESTING->value])
+            // ACTIVATED_FOR_RETEST is an activated reference part awaiting testing —
+            // it behaves exactly like ASSIGNED_TO_SECTION from the analyst's side.
+            ->whereIn('status', [
+                PartStatus::ASSIGNED_TO_SECTION->value,
+                PartStatus::ACTIVATED_FOR_RETEST->value,
+                PartStatus::TESTING->value,
+            ])
             ->whereHas('labResult', fn ($q) => $q->where('lab_section', $validated['section']))
             ->with(['labResult', 'samplingEvent', 'custodyEvents'])
             ->oldest('created_at')

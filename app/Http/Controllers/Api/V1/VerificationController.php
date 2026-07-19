@@ -11,6 +11,7 @@ use App\Http\Resources\SamplePartResource;
 use App\Jobs\GenerateReportPdf;
 use App\Models\SamplePart;
 use App\Services\CustodyStateMachine;
+use App\Services\DisputeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -27,8 +28,10 @@ use Illuminate\Validation\ValidationException;
  */
 class VerificationController extends Controller
 {
-    public function __construct(private readonly CustodyStateMachine $custody)
-    {
+    public function __construct(
+        private readonly CustodyStateMachine $custody,
+        private readonly DisputeService $disputes,
+    ) {
     }
 
     /**
@@ -81,6 +84,10 @@ class VerificationController extends Controller
             $this->custody->transition($part, PartStatus::VERIFIED, $request->user(), [
                 'notes' => $request->input('notes') ?? 'Result verified.',
             ]);
+
+            // If this was a retest (reference part under an open dispute), link the
+            // result back to the dispute and close it. Original results are untouched.
+            $this->disputes->closeRetestIfApplicable($part, $labResult);
         });
 
         // Report rendering is queued — shared hosting cannot render inline reliably.

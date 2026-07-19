@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\V1\Admin\AdminTestCatalogController;
 use App\Http\Controllers\Api\V1\Admin\AdminUserController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustodyController;
+use App\Http\Controllers\Api\V1\DisputeController;
+use App\Http\Controllers\Api\V1\EventController;
 use App\Http\Controllers\Api\V1\FileController;
 use App\Http\Controllers\Api\V1\LabController;
 use App\Http\Controllers\Api\V1\QrController;
@@ -85,6 +87,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('suggest-section', [RegistrationController::class, 'suggestSection']);
     });
 
+    // Retention + destruction — registration officers and admins.
+    Route::middleware('role:REGISTRATION_OFFICER,ADMIN')->prefix('registration')->group(function () {
+        Route::get('retention', [RegistrationController::class, 'retention']);
+        Route::post('destroy', [RegistrationController::class, 'destroy']);
+    });
+
     // Lab workbench — BEHIND THE BLIND WALL. Addressed only by blind_code, and
     // every response here must be a BlindSamplePartResource.
     Route::middleware('role:LAB_ANALYST')->prefix('lab')->group(function () {
@@ -103,6 +111,28 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     // Report download — role check lives in the controller because the owning FSO
     // is allowed too (and analysts are explicitly excluded).
     Route::get('reports/{blindCode}.pdf', [ReportController::class, 'show'])->name('reports.show');
+
+    /*
+    |----------------------------------------------------------------------
+    | Phase 4 — Disputes, resampling, reference lifecycle
+    |----------------------------------------------------------------------
+    */
+
+    // Filing is internal for now (officer files for a walk-in FBO); Phase 6's public
+    // route will reuse DisputeService.
+    Route::middleware('role:REGISTRATION_OFFICER,ADMIN')
+        ->post('disputes', [DisputeController::class, 'store']);
+
+    // Listing + deciding — verifying officers and admins (maker-checker in the service).
+    Route::middleware('role:VERIFYING_OFFICER,ADMIN')->group(function () {
+        Route::get('disputes', [DisputeController::class, 'index']);
+        Route::post('disputes/{dispute}/decide', [DisputeController::class, 'decide']);
+    });
+
+    // Full de-blinded event detail — everyone who legitimately sees the business
+    // (owning FSO enforced in the controller); analysts excluded.
+    Route::middleware('role:FSO,REGISTRATION_OFFICER,VERIFYING_OFFICER,ADMIN')
+        ->get('events/{samplingEvent}/detail', [EventController::class, 'detail']);
 
     // Admin essentials.
     Route::middleware('role:ADMIN')->prefix('admin')->group(function () {

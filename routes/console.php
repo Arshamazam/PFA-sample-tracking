@@ -10,3 +10,6 @@ Artisan::command('inspire', function () {
 
 // Flag abandoned draft sampling events (never finalized within 24h) once a day.
 Schedule::command('sampling:prune-drafts')->dailyAt('01:00');
+
+// Flag settled reference parts as eligible for destruction (never auto-destroys).
+Schedule::command('retention:process')->dailyAt('01:30');
