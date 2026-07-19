@@ -62,6 +62,14 @@ class BlindWallTest extends TestCase
         'address',
         'verdict',
         'report_pdf_path',
+        // A retest must be indistinguishable from a first-time sample.
+        'is_retest',
+        'retest',
+        'dispute',
+        'dispute_id',
+        'activated_for_retest',
+        'original_result',
+        'retest_result',
     ];
 
     private User $analyst;
@@ -218,6 +226,48 @@ class BlindWallTest extends TestCase
 
         // And the part timeline by qr_token must not be a back door.
         $this->getJson("/api/v1/custody/parts/{$part->qr_token}")->assertStatus(403);
+    }
+
+    public function test_an_activated_reference_retest_is_blind_and_looks_like_a_normal_sample(): void
+    {
+        // Stand up a reference part activated for retest (as the dispute flow leaves it).
+        $built = $this->makeReportedEvent();
+        $reference = $built['reference'];
+        $reference->update([
+            'status' => \App\Enums\PartStatus::ACTIVATED_FOR_RETEST,
+            'blind_code' => 'BC-2026-000777',
+        ]);
+        \App\Models\LabResult::create([
+            'sample_part_id' => $reference->id,
+            'lab_section' => \App\Enums\LabSection::CHEMICAL,
+        ]);
+        // The activation custody event (what assigned_at would derive from).
+        $reference->custodyEvents()->create([
+            'status' => \App\Enums\PartStatus::ACTIVATED_FOR_RETEST,
+            'notes' => 'activated',
+        ]);
+
+        $secrets = [
+            'premises name' => $built['event']->premises->name,
+            'original blind code' => $built['lab']->blind_code,
+            'event code' => $built['event']->event_code,
+        ];
+
+        // In the queue it appears exactly like a normal ASSIGNED_TO_SECTION sample.
+        $queue = $this->getJson('/api/v1/lab/queue?section=CHEMICAL')->assertOk()->json();
+        $this->assertBlind($queue, 'GET /lab/queue (retest)');
+        $this->assertNoIdentifyingValues($queue, $secrets, 'GET /lab/queue (retest)');
+
+        $row = collect($queue['data'])->firstWhere('blind_code', 'BC-2026-000777');
+        $this->assertNotNull($row, 'the activated reference should be in the queue');
+        // Crucially, the status does NOT reveal it is a retest.
+        $this->assertSame('ASSIGNED_TO_SECTION', $row['status']);
+        $this->assertSame('Assigned To Section', $row['status_label']);
+
+        // Starting it is likewise blind.
+        $start = $this->postJson('/api/v1/lab/BC-2026-000777/start')->assertOk()->json();
+        $this->assertBlind($start, 'POST /lab/{retest}/start');
+        $this->assertNoIdentifyingValues($start, $secrets, 'POST /lab/{retest}/start');
     }
 
     public function test_analyst_cannot_download_the_report_pdf(): void
