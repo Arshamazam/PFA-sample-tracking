@@ -9,8 +9,10 @@ use App\Enums\SopViolationType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Registration\AssignSectionRequest;
 use App\Http\Requests\Registration\BlindCodeRequest;
+use App\Http\Requests\Registration\DestroyPartRequest;
 use App\Http\Requests\Registration\ReceivePartRequest;
 use App\Http\Requests\Registration\RetainPartRequest;
+use App\Http\Resources\RetentionPartResource;
 use App\Http\Resources\SamplePartResource;
 use App\Models\LabResult;
 use App\Models\SamplePart;
@@ -177,6 +179,58 @@ class RegistrationController extends Controller
                 'matched' => $matches->count(),
             ],
         ]);
+    }
+
+    /**
+     * Manually destroy a retained reference part once it is destruction-eligible.
+     * Photo and notes are mandatory; the eligibility guard lives in the state machine.
+     */
+    public function destroy(DestroyPartRequest $request): JsonResponse
+    {
+        $part = $this->partByToken($request->string('qr_token'));
+
+        if ($part->role !== PartRole::REFERENCE) {
+            throw ValidationException::withMessages([
+                'qr_token' => ['Only the reference part is retained and destroyed.'],
+            ]);
+        }
+
+        $photoPath = $request->file('photo')->store('destruction-photos', 'local');
+
+        $this->custody->transition($part, PartStatus::DESTROYED, $request->user(), [
+            'photo_path' => $photoPath,
+            'notes' => $request->string('notes')->value(),
+            'location_note' => 'Registration Section',
+        ]);
+
+        return $this->partResponse($part);
+    }
+
+    /**
+     * List retained reference parts with their eligibility and retention age.
+     */
+    public function retention(Request $request): \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    {
+        $validated = $request->validate([
+            'eligible' => ['sometimes', 'boolean'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = SamplePart::query()
+            ->where('role', PartRole::REFERENCE->value)
+            ->where('status', PartStatus::IN_RETENTION->value)
+            ->with(['samplingEvent', 'custodyEvents'])
+            ->oldest('updated_at');
+
+        if ($request->has('eligible')) {
+            $request->boolean('eligible')
+                ? $query->whereNotNull('destruction_eligible_at')->where('destruction_eligible_at', '<=', now())
+                : $query->where(fn ($q) => $q->whereNull('destruction_eligible_at')->orWhere('destruction_eligible_at', '>', now()));
+        }
+
+        return RetentionPartResource::collection(
+            $query->paginate($validated['per_page'] ?? 20)->withQueryString()
+        );
     }
 
     /**

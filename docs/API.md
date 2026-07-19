@@ -356,6 +356,91 @@ Returns `application/pdf`. Allowed: `VERIFYING_OFFICER`, `REGISTRATION_OFFICER`,
 
 ---
 
+---
+
+# Phase 4 — Disputes, resampling & the reference lifecycle
+
+When a LAB verdict is **UNFIT**, the FBO may challenge it within
+`dispute_window_days` (default 7). An accepted dispute activates the retained
+**REFERENCE** part for a fresh, blind retest whose result is recorded *alongside*
+the original — never overwriting it. If the window lapses with no dispute (or the
+verdict was FIT), the reference part becomes eligible for manual destruction.
+
+All dispute rules live in `App\Services\DisputeService`, so the Phase 6 public FBO
+route will reuse them unchanged.
+
+## Filing (roles: REGISTRATION_OFFICER, ADMIN)
+
+### POST /disputes
+An officer files on behalf of a walk-in FBO.
+```json
+{ "event_code": "PFA-LHR-2026-000123",
+  "filed_by_name": "Muhammad Aslam", "filed_by_phone": "0300-1234567",
+  "filed_by_cnic": "35201-1234567-1", "reason": "Sample was mishandled." }
+```
+Rejected with `422` when: the event has no UNFIT report; the window has closed (the
+message states the expiry); an open dispute already exists; or the reference part is
+missing/destroyed. Returns `201` with the dispute (including `original_result`).
+
+## Deciding (roles: VERIFYING_OFFICER, ADMIN)
+
+### GET /disputes?status=&from=&to=
+Paginated, full detail — each dispute carries `original_result` and, once present,
+`retest_result`.
+
+### POST /disputes/{id}/decide
+```json
+{ "decision": "ACCEPTED" | "REJECTED", "notes": "mandatory", "lab_section": "CHEMICAL" }
+```
+- **Maker-checker:** the officer who verified the original verdict may not decide the
+  dispute (`422`).
+- **ACCEPTED** (atomic): the reference part gets a **fresh** `BC-` blind code (never
+  the original's), a lab result seeded with the original's section (`lab_section`
+  overrides it), transitions `IN_RETENTION → ACTIVATED_FOR_RETEST` carrying the
+  dispute id, and the dispute moves to `RETEST_IN_PROGRESS`.
+- **REJECTED**: the dispute closes; the reference part is untouched.
+
+## The retest
+
+The activated reference flows through the **existing** lab endpoints
+(`/lab/queue`, `/lab/{blind_code}/start`, `/lab/{blind_code}/results`) and
+verification (`/verification/{blind_code}/verdict`) — there are no retest-specific
+analyst endpoints. To the analyst it is **indistinguishable** from a first-time
+sample: `ACTIVATED_FOR_RETEST` is presented as `ASSIGNED_TO_SECTION`, and nothing in
+the payload reveals it is a retest (enforced by `BlindWallTest`).
+
+When the retest verdict is recorded, the result is linked to
+`dispute.retest_lab_result_id` and the dispute moves to **CLOSED**.
+
+### final_verdict precedence
+On the event detail, `final_verdict` = the **retest** verdict when a retest result
+exists, otherwise the **original** verdict (`final_verdict_source` is `RETEST` or
+`ORIGINAL`). ⚠️ This precedence rule is a reasonable default but **must be confirmed
+with PFA legal before production** (see README).
+
+## Reference lifecycle / retention (roles: REGISTRATION_OFFICER, ADMIN)
+
+- **`php artisan retention:process`** (scheduled daily 01:30) flags a retained
+  reference part `destruction_eligible_at` once its case is settled — a FIT verdict,
+  or an UNFIT verdict whose window has closed with no open dispute. It **never**
+  destroys anything.
+- **GET /registration/retention?eligible=** — retained parts with `storage_location`,
+  `days_retained`, `destruction_eligible_at`, `is_destruction_eligible`.
+- **POST /registration/destroy** — `multipart/form-data`: `qr_token`, `photo`
+  (mandatory), `notes` (mandatory). Guarded: the part must be destruction-eligible
+  (set and past) or `422`. Transitions `IN_RETENTION → DESTROYED`.
+
+## Event detail (roles: FSO owner, REGISTRATION_OFFICER, VERIFYING_OFFICER, ADMIN)
+
+### GET /events/{samplingEvent}/detail
+The complete de-blinded story: event, premises, every part with its custody
+timeline, rapid tests, `original_result`, `retest_result`, `final_verdict`
+(+`_source`), full `disputes` history, and all `sop_violations`. This is the source
+Phase 5's review panel and Phase 6's (filtered) public page build on. Analysts are
+excluded.
+
+---
+
 ## Happy-path walkthrough (curl)
 
 Assumes the app is served at `http://127.0.0.1:8000` and seeded
@@ -454,3 +539,76 @@ curl -s -o report.pdf -H "Authorization: Bearer $VER" "$BASE/reports/$BC.pdf" &&
 Verified output of the run above: part reaches `REPORT_ISSUED`, the PDF is written to
 `reports/PFA-LHR-2026-000001/{part}.pdf`, the verifier and owning FSO download it
 (`200`), and the analyst is refused (`403`).
+
+## Dispute walkthrough (curl) — file → accept → retest → close
+
+Continues from an event whose LAB part reached an **UNFIT** `REPORT_ISSUED`. A
+second verifying officer is needed because the original verifier cannot decide the
+dispute (maker-checker). Reuse tokens — the login limiter is 5/min per IP.
+
+```bash
+BASE=http://127.0.0.1:8000/api/v1
+ACC='Accept: application/json'
+EVENT=PFA-LHR-2026-000123      # the UNFIT event
+REG=... VER=...                # tokens; VER = the ORIGINAL verifier
+
+# A different verifier (maker-checker needs two).
+curl -s -H "$ACC" -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"name":"Verifier Two","email":"verifier2@pfa.test","password":"password123","role":"VERIFYING_OFFICER"}' \
+  $BASE/admin/users
+VER2=$(login verifier2 password123)
+
+# 1. The registration officer files on behalf of the FBO.
+DID=$(curl -s -H "$ACC" -H "Authorization: Bearer $REG" -H 'Content-Type: application/json' \
+  -d "{\"event_code\":\"$EVENT\",\"filed_by_name\":\"Muhammad Aslam\",\"filed_by_phone\":\"0300-4412233\",\"reason\":\"Sample was mishandled.\"}" \
+  $BASE/disputes | php -r 'echo json_decode(file_get_contents("php://stdin"),true)["data"]["id"];')
+
+# 2. The ORIGINAL verifier is blocked (maker-checker) -> 422.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $BASE/disputes/$DID/decide \
+  -H "$ACC" -H "Authorization: Bearer $VER" -H 'Content-Type: application/json' \
+  -d '{"decision":"ACCEPTED","notes":"approve"}'
+
+# 3. A DIFFERENT verifier accepts -> reference activated with a fresh blind code.
+curl -s -X POST $BASE/disputes/$DID/decide \
+  -H "$ACC" -H "Authorization: Bearer $VER2" -H 'Content-Type: application/json' \
+  -d '{"decision":"ACCEPTED","notes":"Grounds sufficient; retest approved."}'
+
+# 4. The retest is just another blind sample in the queue.
+RBC=$(curl -s -H "$ACC" -H "Authorization: Bearer $LAB" \
+  "$BASE/lab/queue?section=CHEMICAL" | php -r 'echo json_decode(file_get_contents("php://stdin"),true)["data"][0]["blind_code"];')
+curl -s -X POST $BASE/lab/$RBC/start   -H "$ACC" -H "Authorization: Bearer $LAB"
+curl -s -X POST $BASE/lab/$RBC/results -H "$ACC" -H "Authorization: Bearer $LAB" \
+  -F 'parameters[0][name]=Fat' -F 'parameters[0][value]=3.8' -F 'parameters[0][within_limit]=1' \
+  -F "report_photo=@/tmp/x.png"
+
+# 5. The retest verdict (FIT) closes the dispute.
+curl -s -X POST $BASE/verification/$RBC/verdict \
+  -H "$ACC" -H "Authorization: Bearer $VER2" -H 'Content-Type: application/json' \
+  -d '{"verdict":"FIT","notes":"Retest within limits."}'
+php artisan queue:work --once --stop-when-empty
+
+# 6. The event detail shows both results; the retest supersedes.
+curl -s -H "$ACC" -H "Authorization: Bearer $VER2" "$BASE/events/$EVENT_ID/detail"
+```
+
+Verified output: the original verifier gets `422`; a different verifier's accept
+moves the dispute to `RETEST_IN_PROGRESS` and gives the reference a fresh code
+(`BC-2026-000002`, distinct from the original `BC-2026-000001`) that appears in the
+queue as a plain `ASSIGNED_TO_SECTION`; the FIT retest verdict closes the dispute;
+and the event detail returns `original=UNFIT`, `retest=FIT`, `final_verdict=FIT`
+(source `RETEST`).
+
+## Reference destruction (curl)
+
+```bash
+# Flag settled reference parts (FIT, or UNFIT past window with no dispute).
+php artisan retention:process
+
+# List retained parts and their eligibility.
+curl -s -H "$ACC" -H "Authorization: Bearer $REG" "$BASE/registration/retention?eligible=1"
+
+# Destroy an eligible part (photo + notes mandatory).
+curl -s -X POST $BASE/registration/destroy \
+  -H "$ACC" -H "Authorization: Bearer $REG" \
+  -F "qr_token=$REF_TOKEN" -F "photo=@/tmp/x.png" -F "notes=Incinerated per SOP, batch 12."
+```
