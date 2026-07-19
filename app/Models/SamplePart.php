@@ -27,6 +27,7 @@ class SamplePart extends Model
         'seal_number',
         'seal_photo_path',
         'status',
+        'destruction_eligible_at',
     ];
 
     protected function casts(): array
@@ -34,6 +35,7 @@ class SamplePart extends Model
         return [
             'role' => PartRole::class,
             'status' => PartStatus::class,
+            'destruction_eligible_at' => 'datetime',
         ];
     }
 

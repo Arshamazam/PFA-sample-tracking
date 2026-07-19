@@ -21,6 +21,7 @@ class Dispute extends Model
         'filed_by_phone',
         'filed_by_cnic',
         'reason',
+        'decision_notes',
         'status',
         'filed_at',
         'decided_by_id',

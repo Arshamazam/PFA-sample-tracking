@@ -51,7 +51,15 @@ class CustodyStateMachine
             'SEALED' => [PartStatus::IN_TRANSIT],
             'IN_TRANSIT' => [PartStatus::RECEIVED_REGISTRATION],
             'RECEIVED_REGISTRATION' => [PartStatus::IN_RETENTION],
-            // Activation path (IN_RETENTION -> ACTIVATED_FOR_RETEST) added in Phase 3/5.
+            // Phase 4: from retention the reference part either gets activated for a
+            // retest (only via an accepted dispute) or is destroyed once eligible.
+            // ACTIVATED_FOR_RETEST behaves like ASSIGNED_TO_SECTION and re-uses the
+            // LAB testing chain and its role guards.
+            'IN_RETENTION' => [PartStatus::ACTIVATED_FOR_RETEST, PartStatus::DESTROYED],
+            'ACTIVATED_FOR_RETEST' => [PartStatus::TESTING],
+            'TESTING' => [PartStatus::RESULT_ENTERED],
+            'RESULT_ENTERED' => [PartStatus::VERIFIED, PartStatus::TESTING],
+            'VERIFIED' => [PartStatus::REPORT_ISSUED],
         ],
         PartRole::FBO_COPY->value => [
             'COLLECTED' => [PartStatus::SEALED],
@@ -88,6 +96,10 @@ class CustodyStateMachine
         'RESULT_ENTERED' => [UserRole::LAB_ANALYST],
         'VERIFIED' => [UserRole::VERIFYING_OFFICER],
         'REPORT_ISSUED' => [UserRole::VERIFYING_OFFICER],
+        // Phase 4: activation is performed while deciding a dispute; destruction by
+        // the registration section (admin may do either).
+        'ACTIVATED_FOR_RETEST' => [UserRole::VERIFYING_OFFICER, UserRole::ADMIN],
+        'DESTROYED' => [UserRole::REGISTRATION_OFFICER, UserRole::ADMIN],
     ];
 
     /**
@@ -196,6 +208,27 @@ class CustodyStateMachine
         // (b) REJECTED requires non-empty notes.
         if ($to === PartStatus::REJECTED && trim((string) ($context['notes'] ?? '')) === '') {
             throw new IllegalTransitionException('Rejecting a part requires a non-empty reason in notes.');
+        }
+
+        // Activation for retest is only ever legitimate off the back of an accepted
+        // dispute, so it must carry the dispute id in its context.
+        if ($to === PartStatus::ACTIVATED_FOR_RETEST && empty($context['dispute_id'])) {
+            throw new IllegalTransitionException(
+                'A reference part can only be activated for retest via an accepted dispute (dispute_id required).'
+            );
+        }
+
+        // Destruction requires a photograph, notes, and that the part has actually
+        // become eligible (destruction_eligible_at set and in the past).
+        if ($to === PartStatus::DESTROYED) {
+            if (trim((string) ($context['photo_path'] ?? '')) === '' || trim((string) ($context['notes'] ?? '')) === '') {
+                throw new IllegalTransitionException('Destroying a part requires a photo and notes.');
+            }
+
+            $eligibleAt = $part->destruction_eligible_at;
+            if ($eligibleAt === null || $eligibleAt->isFuture()) {
+                throw new IllegalTransitionException('This part is not yet eligible for destruction.');
+            }
         }
 
         // (a) Cold chain: perishable samples need a temperature reading when moving
