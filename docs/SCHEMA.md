@@ -58,6 +58,14 @@ Punjab Food Authority Act 2011.
 > lab-section routing via `test_catalog`), `lab_results.lab_result_revisions` (json
 > archive of superseded analyst submissions), and the `sop_violations` table.
 
+> **Phase 4 additions.** `sample_parts.destruction_eligible_at` (set by
+> `retention:process` once the case is settled; never auto-destroys) and
+> `disputes.decision_notes` (the deciding officer's mandatory notes, distinct from
+> the FBO's `reason`). The `disputes` table (from Phase 1) becomes active: on an
+> accepted dispute the reference part is re-blinded and retested, and
+> `retest_lab_result_id` links the retest result back to the dispute. The original
+> result is never overwritten.
+
 ## SOP Violations
 
 Deviations are **recorded, not blocking** — the sample still moves so the lab work is
@@ -119,14 +127,25 @@ LAB:       COLLECTED → SEALED → IN_TRANSIT → RECEIVED_REGISTRATION → BLI
            RESULT_ENTERED → TESTING is also allowed (verifier returns work)
 
 REFERENCE: COLLECTED → SEALED → IN_TRANSIT → RECEIVED_REGISTRATION → IN_RETENTION
-           (ACTIVATED_FOR_RETEST path arrives with disputes, Phase 5)
+           IN_RETENTION → ACTIVATED_FOR_RETEST  (only via an accepted dispute)
+                        → TESTING → RESULT_ENTERED → VERIFIED → REPORT_ISSUED
+           IN_RETENTION → DESTROYED             (only once destruction-eligible)
 
 FBO_COPY:  COLLECTED → SEALED → RELEASED_TO_FBO (terminal)
 ```
 
 Any non-terminal state may also move to `REJECTED` (notes mandatory) — e.g. a broken
 seal at intake. Terminal states: `REPORT_ISSUED`, `RELEASED_TO_FBO`, `REJECTED`,
-`DESTROYED`.
+`DESTROYED`. With Phase 4 the lifecycle is **complete** — every `PartStatus` is
+reachable and every terminal is enforced (locked by
+`tests/Unit/TransitionMapCompletenessTest.php`).
+
+**Phase 4 guards.** `IN_RETENTION → ACTIVATED_FOR_RETEST` requires a `dispute_id` in
+the transition context (activation is only legitimate off an accepted dispute), and
+`IN_RETENTION → DESTROYED` requires a photo, notes, and that
+`destruction_eligible_at` is set and in the past. The retest reuses the LAB testing
+chain and its role guards; `ACTIVATED_FOR_RETEST`/`DESTROYED` add
+VERIFYING_OFFICER+ADMIN / REGISTRATION_OFFICER+ADMIN respectively.
 
 **Role guards** (who may move a part *into* a state):
 

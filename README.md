@@ -17,9 +17,12 @@ JSON API intended for a field mobile app.
 
 > **Phase status.** Complete: Phase 1 (schema, enums, models, seeders), Phase 2
 > (auth, rapid tests, sampling events, the custody state machine, QR, custody
-> scanning), and Phase 3 (registration/receiving, blind coding, the lab workbench
-> behind the blind wall, maker-checker verdicts, report PDFs, and admin essentials).
-> Disputes/resampling, public tracking, SMS, and the UI are later phases.
+> scanning), Phase 3 (registration/receiving, blind coding, the lab workbench
+> behind the blind wall, maker-checker verdicts, report PDFs, and admin essentials),
+> and Phase 4 (disputes, resampling of the reference part, and the retention/
+> destruction lifecycle). The custody state machine is now **complete** — every
+> `PartStatus` is reachable and every terminal enforced. Public tracking, SMS, and
+> the UI are later phases.
 
 ## Documentation
 
@@ -156,6 +159,7 @@ by design, and `reports:retry-failed` re-queues anything left behind.
 | `php artisan sampling:prune-drafts` | Flag draft sampling events left unfinalized > 24h (never deletes). Accepts `--hours=`. Scheduled daily at 01:00. |
 | `php artisan queue:work` | Process queued jobs (report PDF generation) |
 | `php artisan reports:retry-failed` | Re-queue report PDFs for verified samples whose report never generated. Accepts `--limit=`. |
+| `php artisan retention:process` | Flag settled reference parts as destruction-eligible (FIT, or UNFIT past the dispute window with no open dispute). Never destroys anything. Scheduled daily at 01:30. |
 
 ## Configurable settings
 
@@ -184,6 +188,14 @@ the official crest in and point `PFA_REPORT_LOGO` at it.
 - SOP deviations (late transfer, cold-chain breach) are **recorded, not blocking** —
   the sample still moves so lab work is not lost, and an admin resolves the flag via
   `/admin/sop-violations`. A *missing* perishable temperature is still a hard block.
+- **Disputes never overwrite the original result.** An accepted dispute re-blinds and
+  retests the reference part; the retest result is stored alongside the original, and
+  the event detail exposes both.
+- ⚠️ **Legal-precedence rule to confirm before production.** `final_verdict` currently
+  takes the **retest** verdict over the original when a retest exists
+  (`EventDetailResource`, `final_verdict_source`). This is a sensible default but the
+  actual legal precedence under the Punjab Food Authority Act **must be confirmed with
+  PFA legal** — it may differ (e.g. the more severe verdict prevails).
 - Under PHP 8.5 the framework's bundled base config references a PDO constant that is
   deprecated in 8.5; it is harmless and does not occur on the 8.2/8.3 production
   target. `bootstrap/app.php` strips only `E_DEPRECATED` before config loads so it
