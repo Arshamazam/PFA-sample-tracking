@@ -33,6 +33,7 @@ class UserFactory extends Factory
             'phone' => null,
             'cnic' => null,
             'is_active' => true,
+            'must_change_password' => false,
             'remember_token' => Str::random(10),
         ];
     }

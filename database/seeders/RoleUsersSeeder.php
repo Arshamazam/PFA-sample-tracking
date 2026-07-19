@@ -30,6 +30,8 @@ class RoleUsersSeeder extends Seeder
                     'phone' => null,
                     'cnic' => null,
                     'is_active' => true,
+                    // Interim shared password must be rotated on first web login.
+                    'must_change_password' => true,
                     'email_verified_at' => now(),
                 ],
             );
