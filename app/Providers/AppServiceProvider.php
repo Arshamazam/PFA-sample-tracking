@@ -46,9 +46,7 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('public-track', fn (Request $request) => Limit::perMinute(30)->by($request->ip()));
         RateLimiter::for('public-dispute', fn (Request $request) => Limit::perDay(3)->by($request->ip()));
 
-        // SMS notification triggers.
-        \Illuminate\Support\Facades\Event::listen(\App\Events\ReportIssued::class, \App\Listeners\SendReportIssuedSms::class);
-        \Illuminate\Support\Facades\Event::listen(\App\Events\DisputeFiled::class, \App\Listeners\SendDisputeFiledSms::class);
-        \Illuminate\Support\Facades\Event::listen(\App\Events\DisputeDecided::class, \App\Listeners\SendDisputeDecidedSms::class);
+        // SMS notification listeners in app/Listeners are auto-discovered by the
+        // framework from their typed handle() signatures — no explicit mapping needed.
     }
 }
