@@ -24,4 +24,14 @@ return [
     */
     // TODO: derive per-FSO once districts are modelled.
     'district' => env('PFA_DISTRICT', 'LHR'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin panel (Phase 5)
+    |--------------------------------------------------------------------------
+    */
+    'panel' => [
+        // PFA green accent used across the panel chrome (placeholder brand colour).
+        'accent' => env('PFA_PANEL_ACCENT', '#0B6E4F'),
+    ],
 ];

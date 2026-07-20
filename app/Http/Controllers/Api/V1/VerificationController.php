@@ -8,14 +8,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Verification\ReturnToAnalystRequest;
 use App\Http\Requests\Verification\StoreVerdictRequest;
 use App\Http\Resources\SamplePartResource;
-use App\Jobs\GenerateReportPdf;
 use App\Models\SamplePart;
-use App\Services\CustodyStateMachine;
-use App\Services\DisputeService;
+use App\Services\VerificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -28,10 +25,8 @@ use Illuminate\Validation\ValidationException;
  */
 class VerificationController extends Controller
 {
-    public function __construct(
-        private readonly CustodyStateMachine $custody,
-        private readonly DisputeService $disputes,
-    ) {
+    public function __construct(private readonly VerificationService $verification)
+    {
     }
 
     /**
@@ -67,31 +62,12 @@ class VerificationController extends Controller
             ]);
         }
 
-        // Maker-checker: the verifier must not be the analyst who ran the test.
-        if ($labResult->analyst_id !== null && $labResult->analyst_id === $request->user()->id) {
-            throw ValidationException::withMessages([
-                'verified_by' => ['You analysed this sample; a different officer must verify it (maker-checker).'],
-            ]);
-        }
-
-        DB::transaction(function () use ($part, $labResult, $request) {
-            $labResult->update([
-                'verdict' => Verdict::from($request->string('verdict')->value()),
-                'verdict_at' => now(),
-                'verified_by_id' => $request->user()->id,
-            ]);
-
-            $this->custody->transition($part, PartStatus::VERIFIED, $request->user(), [
-                'notes' => $request->input('notes') ?? 'Result verified.',
-            ]);
-
-            // If this was a retest (reference part under an open dispute), link the
-            // result back to the dispute and close it. Original results are untouched.
-            $this->disputes->closeRetestIfApplicable($part, $labResult);
-        });
-
-        // Report rendering is queued — shared hosting cannot render inline reliably.
-        GenerateReportPdf::dispatch($part->id);
+        $this->verification->recordVerdict(
+            $part,
+            $request->user(),
+            Verdict::from($request->string('verdict')->value()),
+            $request->input('notes'),
+        );
 
         return $this->fullResponse($part);
     }
@@ -103,9 +79,7 @@ class VerificationController extends Controller
     {
         $part = $this->partByBlindCode($blindCode);
 
-        $this->custody->transition($part, PartStatus::TESTING, $request->user(), [
-            'notes' => 'Returned to analyst: '.$request->string('notes')->value(),
-        ]);
+        $this->verification->returnToAnalyst($part, $request->user(), $request->string('notes')->value());
 
         return $this->fullResponse($part);
     }
