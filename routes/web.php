@@ -13,6 +13,8 @@ use App\Http\Controllers\Web\Fso\EventController as FsoEventController;
 use App\Http\Controllers\Web\Fso\RapidTestController as FsoRapidTestController;
 use App\Http\Controllers\Web\Fso\ScanController as FsoScanController;
 use App\Http\Controllers\Web\LabController;
+use App\Http\Controllers\Web\Public\DisputeFilingController as PublicDisputeFilingController;
+use App\Http\Controllers\Web\Public\TrackingController;
 use App\Http\Controllers\Web\Registration\BlindCodingController;
 use App\Http\Controllers\Web\Registration\DisputeFilingController;
 use App\Http\Controllers\Web\Registration\ReceivingController;
@@ -29,6 +31,27 @@ use Illuminate\Support\Facades\Route;
 | untouched. Web controllers reuse the SAME services (CustodyStateMachine,
 | DisputeService, EventCodeGenerator, QrService) — no duplicated business logic.
 */
+
+/*
+|--------------------------------------------------------------------------
+| Public tracking (Phase 6) — NO auth, rate-limited, noindex, hostile input
+|--------------------------------------------------------------------------
+*/
+Route::middleware(['throttle:public-track', 'noindex'])->group(function () {
+    Route::get('track', [TrackingController::class, 'landing'])->name('track.landing');
+    Route::get('track/lookup', [TrackingController::class, 'lookup'])->name('track.lookup');
+    Route::get('track/p/{qr_token}', [TrackingController::class, 'byQrToken'])->name('track.qr');
+    Route::get('track/l/{license_no}', [TrackingController::class, 'byLicense'])->name('track.license');
+    Route::get('track/e/{event_code}', [TrackingController::class, 'byEvent'])->name('track.event');
+    Route::get('track/report-photo/{part}', [TrackingController::class, 'reportPhoto'])->name('track.report-photo');
+    Route::get('t/{event_code}', [TrackingController::class, 'shortRedirect'])->name('track.short');
+
+    // Public resampling application — stricter 3/day/IP limit + honeypot in-form.
+    Route::middleware('throttle:public-dispute')->group(function () {
+        Route::get('track/e/{event_code}/dispute', [PublicDisputeFilingController::class, 'create'])->name('track.dispute.create');
+        Route::post('track/e/{event_code}/dispute', [PublicDisputeFilingController::class, 'store'])->name('track.dispute.store');
+    });
+});
 
 // --- Guest ---------------------------------------------------------------
 Route::middleware('guest')->group(function () {
@@ -96,6 +119,11 @@ Route::middleware(['auth', 'active'])->group(function () {
             Route::get('{dispute}', [DisputeController::class, 'show'])->name('show');
             Route::post('{dispute}/decide', [DisputeController::class, 'decide'])->name('decide');
         });
+
+        // Analytics / TAT dashboard — ADMIN + VERIFYING_OFFICER (read-only).
+        Route::middleware('role:ADMIN,VERIFYING_OFFICER')
+            ->get('analytics', [\App\Http\Controllers\Web\AnalyticsController::class, 'index'])
+            ->name('analytics.index');
 
         /* ---------------- Admin ---------------- */
         Route::middleware('role:ADMIN')->prefix('admin')->name('admin.')->group(function () {

@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
             'active' => EnsureUserIsActive::class,
             'password.changed' => RedirectIfMustChangePassword::class,
+            'noindex' => \App\Http\Middleware\NoIndex::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
