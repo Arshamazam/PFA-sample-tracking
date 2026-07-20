@@ -24,10 +24,17 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Enforce HTTPS first (no-op unless FORCE_HTTPS=true).
+        $middleware->prepend(\App\Http\Middleware\ForceHttps::class);
+
+        // Rate-limit the whole API surface (token or IP scoped).
+        $middleware->api(append: ['throttle:api']);
+
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
             'active' => EnsureUserIsActive::class,
             'password.changed' => RedirectIfMustChangePassword::class,
+            'noindex' => \App\Http\Middleware\NoIndex::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

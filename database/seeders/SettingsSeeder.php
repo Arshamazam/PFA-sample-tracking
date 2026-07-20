@@ -20,6 +20,8 @@ class SettingsSeeder extends Seeder
             // Acceptable cold-chain temperature range (deg C) for perishable samples.
             'cold_chain_min_c' => '0',
             'cold_chain_max_c' => '8',
+            // Supervisor mobile for batched SOP-violation summary SMS (blank = disabled).
+            'supervisor_phone' => '',
         ];
 
         foreach ($settings as $key => $value) {

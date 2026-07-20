@@ -29,6 +29,7 @@ return [
     'settings' => 'Settings',
     'file_dispute' => 'File dispute',
     'events' => 'Sampling events',
+    'analytics' => 'Analytics',
     'my_events' => 'My events',
     'new_sample' => 'New sample',
     'rapid_test' => 'Rapid test',

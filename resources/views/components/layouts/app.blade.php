@@ -20,6 +20,7 @@
         UserRole::VERIFYING_OFFICER => [
             [__('panel.verification'), 'verification.queue', 'verification'],
             [__('panel.disputes'), 'disputes.index', 'disputes'],
+            [__('panel.analytics'), 'analytics.index', 'analytics'],
         ],
         UserRole::ADMIN => [
             [__('panel.users'), 'admin.users.index', 'admin.users'],
@@ -27,6 +28,7 @@
             [__('panel.sop_violations'), 'admin.violations.index', 'admin.violations'],
             [__('panel.settings'), 'admin.settings.edit', 'admin.settings'],
             [__('panel.events'), 'admin.events.index', 'admin.events'],
+            [__('panel.analytics'), 'analytics.index', 'analytics'],
         ],
         UserRole::FSO, UserRole::TRANSPORT => [
             [__('panel.my_events'), 'fso.events.index', 'fso.events'],

@@ -44,6 +44,17 @@ class EventCodeGenerator
     }
 
     /**
+     * Build the next public dispute reference (D-{YYYY}-{6-digit}), scoped per year.
+     */
+    public function generateDisputeReference(?int $year = null): string
+    {
+        $year ??= (int) Carbon::now()->format('Y');
+        $sequence = $this->nextSequence(sprintf('dispute_ref:%d', $year));
+
+        return sprintf('D-%d-%06d', $year, $sequence);
+    }
+
+    /**
      * Atomically allocate and return the next value for a named counter.
      *
      * Uses insertOrIgnore + a row lock inside a transaction so concurrent

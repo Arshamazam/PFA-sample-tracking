@@ -13,3 +13,6 @@ Schedule::command('sampling:prune-drafts')->dailyAt('01:00');
 
 // Flag settled reference parts as eligible for destruction (never auto-destroys).
 Schedule::command('retention:process')->dailyAt('01:30');
+
+// Batched SOP-violation summary to the supervisor — at most one SMS per hour.
+Schedule::command('sms:violation-summary')->hourly();
