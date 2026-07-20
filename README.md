@@ -19,10 +19,12 @@ JSON API intended for a field mobile app.
 > (auth, rapid tests, sampling events, the custody state machine, QR, custody
 > scanning), Phase 3 (registration/receiving, blind coding, the lab workbench
 > behind the blind wall, maker-checker verdicts, report PDFs, and admin essentials),
-> and Phase 4 (disputes, resampling of the reference part, and the retention/
-> destruction lifecycle). The custody state machine is now **complete** — every
-> `PartStatus` is reachable and every terminal enforced. Public tracking, SMS, and
-> the UI are later phases.
+> Phase 4 (disputes, resampling of the reference part, and the retention/
+> destruction lifecycle), and Phase 5 (the server-rendered **admin panel** for the
+> internal roles, plus an interim FSO web fallback). The custody state machine is
+> **complete** — every `PartStatus` is reachable and every terminal enforced.
+> Public tracking and SMS are later phases; the Flutter field app replaces the FSO
+> web fallback.
 
 ## Documentation
 
@@ -54,15 +56,36 @@ php artisan migrate:fresh --seed
 ## Running the project
 
 ```bash
+# Build the panel assets once (or `npm run dev` while working on views)
+npm install
+npm run build
+
 php artisan serve
 ```
 
-This starts the PHP development server on <http://127.0.0.1:8000>. The API is served
-under `/api/v1` — see [docs/API.md](docs/API.md) for every endpoint and a copy-paste
-happy-path walkthrough, and authenticate with one of the seeded test accounts below.
+This starts the PHP development server on <http://127.0.0.1:8000>.
 
-The API phases have no frontend to build, but if you are working on the Blade views,
-`composer dev` runs the server, queue worker, log tailer, and Vite together.
+- **Admin panel (Phase 5):** the site root `/` — a server-rendered Blade + Alpine +
+  Tailwind panel for the internal roles, with an interim FSO web fallback under
+  `/field/*`. Log in at `/login` with a seeded account (below); seeded accounts are
+  forced to change their password on first login. See [docs/PANEL.md](docs/PANEL.md).
+- **API:** served under `/api/v1` — see [docs/API.md](docs/API.md) for every endpoint
+  and copy-paste walkthroughs.
+
+For panel development, `npm run dev` runs the Vite dev server (hot reload), or
+`composer dev` runs the PHP server, queue worker, log tailer, and Vite together.
+
+### Deploying the panel to shared hosting
+
+Shared hosting (Hostinger) has no Node. Build the assets **locally** and upload the
+result:
+
+```bash
+npm run build          # writes public/build/
+# then upload public/build/ alongside the app
+```
+
+`public/build/` is the compiled Vite bundle the Blade views reference via `@vite`.
 
 ### Changing the port
 
