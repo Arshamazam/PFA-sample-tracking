@@ -20,11 +20,47 @@ JSON API intended for a field mobile app.
 > scanning), Phase 3 (registration/receiving, blind coding, the lab workbench
 > behind the blind wall, maker-checker verdicts, report PDFs, and admin essentials),
 > Phase 4 (disputes, resampling of the reference part, and the retention/
-> destruction lifecycle), and Phase 5 (the server-rendered **admin panel** for the
-> internal roles, plus an interim FSO web fallback). The custody state machine is
-> **complete** — every `PartStatus` is reachable and every terminal enforced.
-> Public tracking and SMS are later phases; the Flutter field app replaces the FSO
-> web fallback.
+> destruction lifecycle), Phase 5 (the server-rendered **admin panel** for the
+> internal roles, plus an interim FSO web fallback), and Phase 6 (**public
+> tracking**, **SMS notifications**, a **TAT analytics dashboard**, and
+> deployment readiness). The custody state machine is **complete**. The web build
+> is **v1.0.0-web**; the Flutter field app (replacing the FSO web fallback) is the
+> remaining work.
+
+## Public tracking
+
+Unauthenticated, mobile-first, rate-limited, `noindex` pages under `/track`:
+
+- `GET /track` — landing (by license, by event code; QR opens tracking directly)
+- `GET /track/p/{qr_token}` — the URL printed on QR labels since Phase 2
+- `GET /track/l/{license_no}` — a business's finalized events
+- `GET /track/e/{event_code}` — one event (simplified stage timeline, verdict badge
+  at report issue, "after retest" tag, dispute-window note, report photo)
+- `GET /t/{event_code}` — short link used in SMS
+
+All public output goes through `PublicEventResource` (an allow-list — the third
+"wall", after the blind wall and blind-report gating), which never exposes seals,
+blind codes, witnesses, staff identities, temperatures, GPS, SOP details, or
+individual test **parameters** (verdict only). An FBO can file a resampling
+application from an UNFIT public page (honeypot + PK-phone check + 3/day/IP limit);
+it reuses `DisputeService::file()` with zero new rules and returns a `D-YYYY-NNNNNN`
+reference.
+
+## SMS notifications
+
+Gateway-swappable: implement `App\Contracts\SmsGateway` and point `SMS_DRIVER` at it.
+Ships with `log` (default), `null`, and a `sendpk` template. Sends are queued
+(`SendSms`, 3 tries + backoff) and every attempt is written to `sms_logs`. Triggers:
+report issued (FBO + FSO), retest report (FBO), dispute filed/accepted/rejected, and
+a **batched** hourly supervisor summary of SOP violations. Templates in
+`lang/en/sms.php` (Urdu stubbed).
+
+## Analytics (TAT dashboard)
+
+`/analytics` (ADMIN + VERIFYING_OFFICER, read-only): live pipeline, turnaround per
+stage computed from `custody_events` vs catalog TAT, SOP summary, and volume with the
+**UNFIT→FIT retest overturn rate** flagged. Server-rendered CSS bars, cached 10 min.
+`php artisan analytics:tat --from= --to=` prints the same numbers.
 
 ## Documentation
 
@@ -183,6 +219,8 @@ by design, and `reports:retry-failed` re-queues anything left behind.
 | `php artisan queue:work` | Process queued jobs (report PDF generation) |
 | `php artisan reports:retry-failed` | Re-queue report PDFs for verified samples whose report never generated. Accepts `--limit=`. |
 | `php artisan retention:process` | Flag settled reference parts as destruction-eligible (FIT, or UNFIT past the dispute window with no open dispute). Never destroys anything. Scheduled daily at 01:30. |
+| `php artisan sms:violation-summary` | Batched supervisor SMS of SOP violations in the last hour. Scheduled hourly. |
+| `php artisan analytics:tat --from= --to= --section=` | Print turnaround, volume, and quality analytics. |
 
 ## Configurable settings
 
@@ -194,6 +232,7 @@ code:
 | `dispute_window_days` | `7` | Days an FBO has to dispute an UNFIT verdict (Phase 5) |
 | `same_day_transfer_deadline` | `20:00` | Samples reaching registration later than this on the collection day are flagged `SAME_DAY_TRANSFER` |
 | `cold_chain_min_c` / `cold_chain_max_c` | `0` / `8` | Acceptable perishable temperature range; outside it a scan is accepted but flagged `COLD_CHAIN_BREACH` |
+| `supervisor_phone` | *(blank)* | Mobile for the batched hourly SOP-violation summary SMS; blank disables it |
 
 Report branding (logo, authority names) is in [config/pfa.php](config/pfa.php) — drop
 the official crest in and point `PFA_REPORT_LOGO` at it.
