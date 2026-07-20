@@ -77,5 +77,12 @@ class GenerateReportPdf implements ShouldQueue
         $custody->transition($part, PartStatus::REPORT_ISSUED, null, [
             'notes' => 'Test report generated and issued.',
         ]);
+
+        // Notify (FBO + FSO, or FBO final verdict for a retest). A reference part
+        // reaching REPORT_ISSUED is a retest.
+        \App\Events\ReportIssued::dispatch(
+            $part->id,
+            $part->role === \App\Enums\PartRole::REFERENCE,
+        );
     }
 }

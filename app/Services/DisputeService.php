@@ -7,6 +7,8 @@ use App\Enums\LabSection;
 use App\Enums\PartRole;
 use App\Enums\PartStatus;
 use App\Enums\Verdict;
+use App\Events\DisputeDecided;
+use App\Events\DisputeFiled;
 use App\Models\Dispute;
 use App\Models\LabResult;
 use App\Models\SamplePart;
@@ -107,15 +109,21 @@ class DisputeService
             ]);
         }
 
-        return Dispute::create([
+        $dispute = Dispute::create([
             'sampling_event_id' => $event->id,
             'filed_by_name' => $data['filed_by_name'],
             'filed_by_phone' => $data['filed_by_phone'],
             'filed_by_cnic' => $data['filed_by_cnic'] ?? null,
             'reason' => $data['reason'] ?? null,
             'status' => DisputeStatus::FILED,
+            'source' => $data['source'] ?? 'INTERNAL',
+            'reference_no' => $this->codes->generateDisputeReference(),
             'filed_at' => Carbon::now(),
         ]);
+
+        DisputeFiled::dispatch($dispute->id);
+
+        return $dispute;
     }
 
     /**
@@ -155,6 +163,8 @@ class DisputeService
                 'decision_notes' => $notes,
             ]);
 
+            DisputeDecided::dispatch($dispute->id, false);
+
             return $dispute->refresh();
         }
 
@@ -191,6 +201,8 @@ class DisputeService
             ]);
 
             $dispute->update(['status' => DisputeStatus::RETEST_IN_PROGRESS]);
+
+            DisputeDecided::dispatch($dispute->id, true);
 
             return $dispute->refresh();
         });

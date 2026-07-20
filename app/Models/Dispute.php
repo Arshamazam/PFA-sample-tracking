@@ -23,6 +23,8 @@ class Dispute extends Model
         'reason',
         'decision_notes',
         'status',
+        'source',
+        'reference_no',
         'filed_at',
         'decided_by_id',
         'decided_at',
