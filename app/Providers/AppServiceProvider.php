@@ -39,6 +39,9 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by($request->ip());
         });
 
+        // General API surface: 60/min per authenticated user, else per IP.
+        RateLimiter::for('api', fn (Request $request) => Limit::perMinute(60)->by($request->user()?->id ?: $request->ip()));
+
         // Public tracking pages: 30/min/IP. Public dispute filing: 3/day/IP.
         RateLimiter::for('public-track', fn (Request $request) => Limit::perMinute(30)->by($request->ip()));
         RateLimiter::for('public-dispute', fn (Request $request) => Limit::perDay(3)->by($request->ip()));
